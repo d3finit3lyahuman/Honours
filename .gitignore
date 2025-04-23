@@ -1,0 +1,91 @@
+# env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.development
+.env.test
+.env.production
+
+# Compiled source files
+*.com
+*.class
+*.dll
+*.exe
+*.o
+*.so
+*.pyc
+__pycache__/
+
+# Packages
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editor folders
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# LaTeX temporary files
+*.aux
+*.bbl
+*.blg
+*.dvi
+*.lof
+*.lot
+*.out
+*.toc
+
+# R files
+.Rhistory
+.RData
+
+# Microsoft Office files
+~$*
+*.tmp
+
+# Python environments
+venv/
+env/
+.env/
+.venv/
+ENV/
+
+# Node modules
+node_modules/
+
+# Build directories
+build/
+dist/
+
+# Log files
+logs/
+*.log
+*.out
+*.err
