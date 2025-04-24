@@ -32,6 +32,7 @@ __pycache__/
 *.log
 *.sql
 *.sqlite
+logs/
 
 # OS generated files
 .DS_Store
@@ -84,8 +85,6 @@ node_modules/
 build/
 dist/
 
-# Log files
-logs/
-*.log
-*.out
-*.err
+# pdf files
+*.pdf
+*.pdftex
