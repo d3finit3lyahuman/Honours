@@ -3,8 +3,6 @@ import pandas as pd
 import seaborn as sns
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import plotly.express as px
 import math
 import io
 import glob
@@ -19,7 +17,7 @@ from sklearn.metrics import (
     cohen_kappa_score,
 )
 
-st.set_page_config(page_title="Depression Detection Comparison", layout="centered")
+st.set_page_config(page_title="Depression Detection Comparison", layout="wide")
 
 
 # --- Theme Colors (Define globally for consistency) ---
@@ -51,6 +49,8 @@ DARK_THEME = {
 
 
 # --- Helper Functions ---
+
+
 def download_figure(fig, filename):
     # (Keep this function as is)
     buf = io.BytesIO()
@@ -68,6 +68,7 @@ def download_figure(fig, filename):
 
 @st.cache_data
 def load_all_data(pattern="data/*_results-525.csv"):
+    # (Keep this function as is)
     data_files = glob.glob(pattern)
     all_data = {}
     if not data_files:
@@ -111,6 +112,8 @@ def set_custom_theme():
 
 
 # --- Plotting Functions (Modified for Theme) ---
+
+
 def plot_confusion_matrix(df, model_name, theme_colors):
     df = df.copy()
     df["label"] = df["label"].astype(int)
@@ -120,66 +123,30 @@ def plot_confusion_matrix(df, model_name, theme_colors):
     f1 = f1_score(df["label"], df["predicted_label"])
 
     fig, ax = plt.subplots(figsize=(6, 4.5))
-    fig.patch.set_facecolor(theme_colors["face_color"])
-    ax.set_facecolor(theme_colors["face_color"])
+    fig.patch.set_facecolor(theme_colors["face_color"])  # Set figure background
+    ax.set_facecolor(theme_colors["face_color"])  # Set axes background
 
-    # --- Heatmap Plotting ---
-    cmap_name = "Blues" # Keep the colormap consistent
-    cmap = plt.get_cmap(cmap_name)
-    # Normalize data values for colormap (0 to 1 range)
-    norm = mcolors.Normalize(vmin=cm.min(), vmax=cm.max())
-
-    # Plot heatmap *without* default annotations initially
     sns.heatmap(
         cm,
-        annot=False, # Set annot=False initially
+        annot=True,
         fmt="d",
-        cmap=cmap_name,
-        cbar=False,
+        cmap="Blues",
+        cbar=False,  # Keep Blues for CM usually
         xticklabels=["Not Depressed", "Depressed"],
         yticklabels=["Not Depressed", "Depressed"],
         ax=ax,
-        linewidths=0.5, # Add subtle lines between cells
-        linecolor=theme_colors["face_color"] # Lines match background
+        annot_kws={"color": theme_colors["text_color"]},  # Adjust annotation color
     )
-
-    # --- Add Annotations with Dynamic Color ---
-    # Define contrasting colors (can be simple black/white or theme-based)
-    text_color_light_bg = theme_colors.get("heatmap_annot_light", "black") # Default black
-    text_color_dark_bg = theme_colors.get("heatmap_annot_dark", "white") # Default white
-
-    # Iterate through data cells to add annotations manually
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            cell_value = cm[i, j]
-            # Get background color for the cell based on its value
-            cell_color = cmap(norm(cell_value))
-            # Calculate luminance (simple approximation)
-            # Formula: 0.299*R + 0.587*G + 0.114*B
-            luminance = (0.299 * cell_color[0] + 0.587 * cell_color[1] + 0.114 * cell_color[2])
-            # Choose text color based on luminance threshold (0.5 is common)
-            text_color = text_color_dark_bg if luminance < 0.5 else text_color_light_bg
-            # Add the text annotation to the center of the cell
-            ax.text(
-                j + 0.5, # x-coordinate (center of cell)
-                i + 0.5, # y-coordinate (center of cell)
-                f"{cell_value}", # The annotation text (formatted number)
-                ha="center", va="center", # Center alignment
-                color=text_color, # Set dynamic color
-                fontsize=10 # Adjust font size if needed
-            )
-    # --- End Dynamic Annotations ---
-
-
-    # --- Set other plot elements using theme colors ---
     ax.set_xlabel("Predicted Label", color=theme_colors["text_color"])
     ax.set_ylabel("True Label", color=theme_colors["text_color"])
     ax.set_title(
         f"{model_name} Confusion Matrix\nAccuracy: {accuracy:.2f}, F1 Score: {f1:.2f}",
         color=theme_colors["text_color"],
     )
+    # Set tick colors
     ax.tick_params(axis="x", colors=theme_colors["text_color"])
     ax.tick_params(axis="y", colors=theme_colors["text_color"])
+    # Set border colors
     for spine in ax.spines.values():
         spine.set_edgecolor(theme_colors["grid_color"])
 
@@ -212,15 +179,11 @@ def display_dataset_statistics(df, title, filename, theme_colors):
     ax.tick_params(axis="x", colors=theme_colors["text_color"])
     ax.tick_params(axis="y", colors=theme_colors["text_color"])
 
-    fig.tight_layout()
-
     # Make bar labels readable
     for container in ax.containers:
         ax.bar_label(container, color=theme_colors["text_color"], fontsize=9, padding=3)
 
-    plot_col, _ =  st.columns([3, 1])
-    with plot_col:
-        st.pyplot(fig)
+    st.image(fig_to_buffer(fig), width=600)  # Use buffer and st.image
     plt.close(fig)
     download_figure(fig, filename)  # Download still uses original fig
 
@@ -258,68 +221,19 @@ def plot_correlation_heatmap_pair(df, col_a, col_b, name_a, name_b, theme_colors
     fig.patch.set_facecolor(theme_colors["face_color"])
     ax.set_facecolor(theme_colors["face_color"])
 
-    # --- Heatmap Plotting with Dynamic Annotation Color ---
-    cmap_name = theme_colors["palette_heatmap"]
-    # Ensure the chosen colormap exists
-    try:
-        cmap = plt.get_cmap(cmap_name)
-    except ValueError:
-        st.warning(f"Colormap '{cmap_name}' not found. Using default 'viridis'.")
-        cmap_name = "viridis"
-        cmap = plt.get_cmap(cmap_name)
-
-    # Normalize data values for colormap (0 to 1 range)
-    # Handle case where all values are the same to avoid division by zero
-    vmin = heatmap_data.min().min()
-    vmax = heatmap_data.max().max()
-    if vmin == vmax:
-        norm = mcolors.Normalize(vmin=vmin - 1e-6, vmax=vmax + 1e-6) # Avoid zero range
-    else:
-        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-
-
-    # Plot heatmap *without* default annotations initially
     sns.heatmap(
         heatmap_data,
-        annot=False, # Set annot=False initially
+        annot=True,
         fmt="d",
-        cmap=cmap_name,
+        cmap=theme_colors["palette_heatmap"],
         cbar=True,
         ax=ax,
         square=True,
         linewidths=0.5,
-        linecolor=theme_colors["face_color"], # Lines match background
+        linecolor=theme_colors["face_color"],
+        annot_kws={"color": theme_colors["text_color"]},
         cbar_kws={"label": "Frequency"},
     )
-
-    # --- Add Annotations with Dynamic Color ---
-    # Define contrasting colors (can be simple black/white or theme-based)
-    text_color_light_bg = theme_colors.get("heatmap_annot_light", "black") # Default black
-    text_color_dark_bg = theme_colors.get("heatmap_annot_dark", "white") # Default white
-
-    # Iterate through data cells to add annotations manually
-    for i in range(heatmap_data.shape[0]):
-        for j in range(heatmap_data.shape[1]):
-            cell_value = heatmap_data.iloc[i, j]
-            # Get background color for the cell based on its value
-            cell_color = cmap(norm(cell_value))
-            # Calculate luminance (simple approximation)
-            # Formula: 0.299*R + 0.587*G + 0.114*B
-            luminance = (0.299 * cell_color[0] + 0.587 * cell_color[1] + 0.114 * cell_color[2])
-            # Choose text color based on luminance threshold (0.5 is common)
-            text_color = text_color_dark_bg if luminance < 0.5 else text_color_light_bg
-            # Add the text annotation to the center of the cell
-            ax.text(
-                j + 0.5, # x-coordinate (center of cell)
-                i + 0.5, # y-coordinate (center of cell)
-                f"{cell_value}", # The annotation text (formatted number)
-                ha="center", va="center", # Center alignment
-                color=text_color, # Set dynamic color
-                fontsize=9 # Adjust font size if needed
-            )
-    # --- End Dynamic Annotations ---
-
-
     ax.figure.axes[-1].yaxis.label.set_color(
         theme_colors["text_color"]
     )  # Colorbar label
@@ -397,7 +311,7 @@ def plot_violin_distribution_pair(df, col_a, col_b, name_a, name_b, theme_colors
 
 
 def plot_scatter_correlation_pair(df, col_a, col_b, name_a, name_b, theme_colors):
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, ax = plt.subplots(figsize=(8, 7))  # Adjusted size
     fig.patch.set_facecolor(theme_colors["face_color"])
     ax.set_facecolor(theme_colors["face_color"])
 
@@ -488,7 +402,7 @@ def plot_scatter_correlation_pair(df, col_a, col_b, name_a, name_b, theme_colors
 def fig_to_buffer(fig):
     buf = io.BytesIO()
     fig.savefig(
-        buf, format="png", bbox_inches="tight", dpi=600, facecolor=fig.get_facecolor()
+        buf, format="png", bbox_inches="tight", dpi=150, facecolor=fig.get_facecolor()
     )
     buf.seek(0)
     return buf
@@ -525,9 +439,7 @@ def overall_overview_tab(all_data, theme_colors):
 
 
 def model_performance_tab(all_data, theme_colors):
-    # This function is now called within the evaluations_tab
-    # No need for its own st.header if called from within another tab/section
-    # st.header("Individual Model Classification Performance") # Removed
+    st.header("Individual Model Classification Performance")
     st.markdown(
         "Confusion Matrix, Accuracy, and F1 Score per model (Severity >= 2 -> Depressed)."
     )  # Concise
@@ -617,13 +529,7 @@ def model_performance_tab(all_data, theme_colors):
             st.subheader(f"Performance Details for: {selected_model_name}")
             if selected_model_name in all_figs:
                 fig_to_display = all_figs[selected_model_name]
-
-                # --- Use columns to constrain st.pyplot width ---
-                plot_col, _ = st.columns([2, 1]) # Allocate 2/3 of width
-                with plot_col:
-                    st.pyplot(fig_to_display)
-                # --- End column wrapping ---
-
+                st.image(fig_to_buffer(fig_to_display), width=550)
                 plt.close(fig_to_display)
                 download_figure(
                     all_figs[selected_model_name],
@@ -667,7 +573,7 @@ def model_performance_tab(all_data, theme_colors):
         comparison_df = pd.DataFrame(valid_performance_data)
         if not comparison_df.empty:
             fig_comp, ax_comp = plt.subplots(
-                figsize=(max(5, len(comparison_df) * 1.0), 5)
+                figsize=(max(5, len(comparison_df) * 1.2), 5)
             )
             fig_comp.patch.set_facecolor(theme_colors["face_color"])
             ax_comp.set_facecolor(theme_colors["face_color"])
@@ -698,11 +604,9 @@ def model_performance_tab(all_data, theme_colors):
                 ha="right",
                 color=theme_colors["text_color"],
             )
-            legend = ax_comp.legend(frameon=True) # Ensure frame is on
-            legend.get_frame().set_facecolor(theme_colors["face_color"]) # Set background color
-            legend.get_frame().set_edgecolor(theme_colors["text_color"]) # Set border color
+            legend = ax_comp.legend()
             for text in legend.get_texts():
-                text.set_color(theme_colors["text_color"]) # Set text color
+                text.set_color(theme_colors["text_color"])
             ax_comp.bar_label(
                 rects1, padding=3, fmt="%.2f", color=theme_colors["text_color"]
             )
@@ -723,7 +627,7 @@ def model_performance_tab(all_data, theme_colors):
             ax_comp.tick_params(axis="y", colors=theme_colors["text_color"])
             fig_comp.tight_layout()
 
-            st.pyplot(fig_comp) # Reverted from st.image
+            st.image(fig_to_buffer(fig_comp), width=700)
             plt.close(fig_comp)
             download_figure(fig_comp, "all_models_performance_comparison.png")
             st.dataframe(comparison_df.round(3))
@@ -736,9 +640,7 @@ def model_performance_tab(all_data, theme_colors):
 
 
 def pairwise_comparison_tab(all_data, theme_colors):
-    # This function is now called within the evaluations_tab
-    # No need for its own st.header if called from within another tab/section
-    # st.header("Pairwise Model Comparison") # Removed
+    st.header("Pairwise Model Comparison")
     model_names = list(all_data.keys())
     if len(model_names) < 2:
         st.warning("Need at least two models.")
@@ -835,7 +737,7 @@ def pairwise_comparison_tab(all_data, theme_colors):
             model_b_name,
             theme_colors,
         )
-        st.pyplot(fig) # Reverted from st.image
+        st.image(fig_to_buffer(fig), width=600)  # Use st.image
         plt.close(fig)
         download_figure(fig, f"{model_a_name}_vs_{model_b_name}_heatmap.png")
     elif visualization_type == "Violin Plot":
@@ -847,7 +749,7 @@ def pairwise_comparison_tab(all_data, theme_colors):
             model_b_name,
             theme_colors,
         )
-        st.pyplot(fig) # Reverted from st.image
+        st.image(fig_to_buffer(fig), width=650)  # Use st.image
         plt.close(fig)
         download_figure(fig, f"{model_a_name}_vs_{model_b_name}_violin.png")
     elif visualization_type == "Scatter Plot":
@@ -859,14 +761,15 @@ def pairwise_comparison_tab(all_data, theme_colors):
             model_b_name,
             theme_colors,
         )
-        st.pyplot(fig) # Reverted from st.image
+        st.image(fig_to_buffer(fig), width=700)  # Use st.image
         plt.close(fig)
         download_figure(fig, f"{model_a_name}_vs_{model_b_name}_scatter_jitter.png")
 
 
 def multi_model_agreement_tab(all_data):
+    # (Keep this function as is, using krippendorff)
     st.markdown(
-        "Krippendorff's Alpha (α) measures agreement among 3+ models (Ordinal Scale)."
+        "Calculates Krippendorff's Alpha (α) for agreement among 3+ models (Ordinal Scale)."
     )
     model_names = list(all_data.keys())
     num_models = len(model_names)
@@ -874,7 +777,7 @@ def multi_model_agreement_tab(all_data):
         st.warning("Requires at least three models.")
         return
 
-    st.subheader("Select Models for Agreement")
+    st.subheader("Select Models for Group Agreement Analysis")
     selected_models = st.multiselect(
         "Choose 3 or more models:",
         options=model_names,
@@ -884,9 +787,9 @@ def multi_model_agreement_tab(all_data):
     if len(selected_models) < 3:
         st.info("Please select at least 3 models.")
         return
-    st.caption(f"Calculating for: {', '.join(selected_models)}")
+    st.markdown(f"**Calculating agreement for:** {', '.join(selected_models)}")
 
-    st.subheader("Calculation")
+    st.subheader("Data Preparation & Calculation")
     rating_cols = [f"rating_{name}" for name in selected_models]
     relevant_dfs = []
     for name in selected_models:
@@ -925,7 +828,7 @@ def multi_model_agreement_tab(all_data):
         st.error("Could not convert ratings to numeric.")
         return
 
-    with st.expander("View Cleaned Ratings Data Used"):
+    with st.expander("View Cleaned Ratings Data (Items x Raters) Used"):
         st.dataframe(reliability_data_clean)
 
     data_for_alpha = reliability_data_clean.values
@@ -965,12 +868,14 @@ def multi_model_agreement_tab(all_data):
             else:
                 alpha_interp = "High agreement"
             st.caption(f"Interpretation: {alpha_interp}")
+        st.caption(f"Based on {num_samples_used} samples.")
     except Exception as e:
         st.error(f"Could not calculate Alpha: {e}")
         st.dataframe(reliability_data_clean.head())
 
 
-def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for consistency
+def text_analysis_tab_modular(all_data):
+    # (Keep this function as is - reverted to simple explanation display)
     st.header("Text Sample Analysis")
     model_names = list(all_data.keys())
     num_models = len(model_names)
@@ -1026,13 +931,13 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
                 [int(l) for l in unique_labels if l in [0, 1]]
             )
             label_filter = st.selectbox(
-                "True Label:",
+                "Label:",
                 options=label_options,
                 format_func=lambda x: (
-                    "All" if x is None else ("Not Depression (0)" if x == 0 else "Depression (1)")
+                    "All" if x is None else ("Not Dep. (0)" if x == 0 else "Dep. (1)")
                 ),
                 key="label_filter_modular",
-            )
+            )  # Shorter labels
     with col_filter2:
         filter_model_name = st.selectbox(
             "Model:", ["None"] + model_names, key="filter_model_select"
@@ -1106,82 +1011,67 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
         end_idx = min(start_idx + items_per_page, total_items)
         paginated_df = filtered_df.iloc[start_idx:end_idx]
         for index, row in paginated_df.iterrows():
-            expander_label = f"Sample {index}: {str(row.get('text', 'N/A'))[:60]}…"  # preview
+            expander_label = f"Sample {index}: {str(row.get('text', 'N/A'))[:60]}..."  # Slightly more text
             with st.expander(expander_label):
-                st.markdown("**Text:**")
-                # Display text directly without scrollable div
-                st.markdown(row.get("text", "N/A"))
-
+                st.markdown(f"**Text:**")
+                st.text_area(
+                    "Text",
+                    value=row.get("text", "N/A"),
+                    height=100,
+                    disabled=True,
+                    label_visibility="collapsed",
+                )  # Use text_area for scrollable text
                 if "label" in row and pd.notna(row["label"]):
-                    true_label = (
-                        "Depressed (1)" if int(row["label"]) == 1 else "Not Depressed (0)"
+                    st.markdown(
+                        f"**True Label:** {'Depressed (1)' if int(row['label']) == 1 else 'Not Depressed (0)'}"
                     )
-                    st.markdown(f"**True Label:** {true_label}")
                 else:
                     st.markdown("**True Label:** N/A")
-
                 st.markdown("---")
                 st.markdown("##### Model Analyses:")
-
                 remove_pattern = r"^\s*(\*{0,2})?Explanation(\*{0,2})?\s*:\s*\n?"
                 models_per_row = min(num_models, 3)
-
                 for row_idx in range(0, len(model_names), models_per_row):
-                    row_models = model_names[row_idx: row_idx + models_per_row]
-                    cols = st.columns(len(row_models))
+                    row_models = model_names[row_idx : row_idx + models_per_row]
+                    row_cols = st.columns(len(row_models))
                     for col_idx, name in enumerate(row_models):
-                        with cols[col_idx]:
+                        with row_cols[col_idx]:
                             st.markdown(f"**{name}**")
-                            rating = row.get(f"rating_{name}", "N/A")
+                            rating_col = f"rating_{name}"
+                            expl_col = f"explanation_{name}"
+                            rating = row.get(rating_col, "N/A")
+                            explanation_raw = str(row.get(expl_col, "N/A"))
+                            explanation = (
+                                re.sub(
+                                    remove_pattern,
+                                    "",
+                                    explanation_raw,
+                                    flags=re.IGNORECASE,
+                                )
+                                .strip()
+                                .replace("**", "")
+                            )
                             if pd.notna(rating) and str(rating).lower() != "n/a":
                                 try:
-                                    sev = int(float(rating))
-                                    st.markdown(f"**Severity:** {sev}")
-                                except:
-                                    st.markdown(f"**Severity:** {rating} (Invalid)")
+                                    st.markdown(f"**Severity**: {int(float(rating))}")
+                                except ValueError:
+                                    st.markdown(f"**Severity**: {rating} (Invalid)")
                             else:
-                                st.markdown("**Severity:** N/A")
-
-                            expl_raw = str(row.get(f"explanation_{name}", "")).strip()
-                            expl_clean = (
-                                re.sub(remove_pattern, "", expl_raw, flags=re.IGNORECASE)
-                                .replace("**", "")
-                                .strip()
+                                st.markdown("**Severity**: N/A")
+                            # Use text_area for scrollable explanations
+                            st.text_area(
+                                f"Explanation_{name}_{index}",
+                                value=(
+                                    explanation
+                                    if explanation and explanation.lower() != "n/a"
+                                    else "N/A"
+                                ),
+                                height=150,
+                                disabled=True,
+                                label_visibility="collapsed",
                             )
-                            st.markdown("**Explanation:**")
-                            # Display explanation directly without scrollable div
-                            st.markdown(expl_clean or "N/A")
-
                     if row_idx + models_per_row < len(model_names):
                         st.markdown("---")
-
-                # --- Add Download Button for the sample ---
-                st.markdown("---")
-                # Prepare data for download
-                sample_data_df = pd.DataFrame([row])
-                # Select and rename columns for clarity in the CSV
-                cols_to_download = ["text"]
-                if "label" in sample_data_df.columns:
-                    cols_to_download.append("label")
-                for name in model_names:
-                    if f"rating_{name}" in sample_data_df.columns:
-                        cols_to_download.append(f"rating_{name}")
-                    if f"explanation_{name}" in sample_data_df.columns:
-                        cols_to_download.append(f"explanation_{name}")
-
-                sample_data_df_download = sample_data_df[cols_to_download]
-
-                csv_data = sample_data_df_download.to_csv(index=False).encode("utf-8")
-
-                st.download_button(
-                    label="Download Sample Data (CSV)",
-                    data=csv_data,
-                    file_name=f"sample_{index}.csv",
-                    mime="text/csv",
-                    key=f"download_sample_{index}" # Unique key per button
-                )
-                # --- End Download Button ---
-
         st.write("---")
         col_page1, col_page2, col_page3 = st.columns([1, 2, 1])
         with col_page1:
@@ -1196,7 +1086,7 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
                 st.rerun()
         with col_page2:
             st.markdown(
-                f"<div style='text-align: center; margin-top: 5px; color: {theme_colors['text_color']};'>Page {current_page} of {total_pages}</div>",
+                f"<div style='text-align: center; margin-top: 5px;'>Page {current_page} of {total_pages}</div>",
                 unsafe_allow_html=True,
             )
         with col_page3:
@@ -1217,8 +1107,6 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
 def evaluations_tab(all_data, theme_colors):  # Pass theme_colors
     st.header("Model Evaluation Metrics")
     model_names = list(all_data.keys())
-
-    # Use sub-tabs within the main "Evaluations" section
     sub_tab_titles = ["Individual Performance", "Pairwise Comparison"]
     if len(model_names) >= 3:
         sub_tab_titles.append("Multi-Model Agreement")
@@ -1248,21 +1136,19 @@ def evaluations_tab(all_data, theme_colors):  # Pass theme_colors
                 st.info("Requires at least three models.")
 
 
-# --- Main Function (Modified for Sidebar Navigation) ---
+# --- Main Function (Modified for Theme Toggle) ---
 def main():
     set_custom_theme()
     st.title("Depression Severity Detection Comparison")
 
-    # --- Sidebar for Settings and Navigation ---
+    # --- Theme Toggle ---
+    # Place it prominently, maybe in sidebar or near top
+    # Using sidebar here for less clutter in main area
     with st.sidebar:
         st.header("Settings")
         use_dark_theme = st.checkbox(
             "Use Dark Theme for Plots", key="dark_theme_plots", value=False
         )  # Default to light
-
-        st.header("Navigation")
-        page_options = ["Overall Overview", "Text Sample Analysis", "Evaluations"]
-        selected_page = st.radio("Go to", page_options, key="main_nav")
 
     # Determine theme colors based on toggle state
     theme_colors = DARK_THEME if use_dark_theme else LIGHT_THEME
@@ -1277,14 +1163,19 @@ def main():
         model_names = list(all_data.keys())
         print(f"Loaded models: {', '.join(model_names)}")
 
-        # --- Display content based on sidebar selection ---
-        if selected_page == "Overall Overview":
+        tab_titles = ["Overall Overview", "Text Sample Analysis", "Evaluations"]
+        tabs = st.tabs(tab_titles)
+        tab_map = {title: tab for title, tab in zip(tab_titles, tabs)}
+
+        with tab_map["Overall Overview"]:
             overall_overview_tab(all_data, theme_colors)  # Pass theme
 
-        elif selected_page == "Text Sample Analysis":
-            text_analysis_tab_modular(all_data, theme_colors) # Pass theme
+        with tab_map["Text Sample Analysis"]:
+            text_analysis_tab_modular(
+                all_data
+            )  # Text analysis doesn't use plots currently
 
-        elif selected_page == "Evaluations":
+        with tab_map["Evaluations"]:
             evaluations_tab(all_data, theme_colors)  # Pass theme
 
     except Exception as e:
