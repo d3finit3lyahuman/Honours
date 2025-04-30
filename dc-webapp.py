@@ -11,6 +11,7 @@ import glob
 import os
 import re
 import krippendorff
+import traceback
 from functools import reduce
 from sklearn.metrics import (
     confusion_matrix,
@@ -19,7 +20,7 @@ from sklearn.metrics import (
     cohen_kappa_score,
 )
 
-st.set_page_config(page_title="Depression Detection Comparison", layout="centered")
+st.set_page_config(page_title="Depression Detection Comparison", layout="wide")
 
 
 # --- Theme Colors (Define globally for consistency) ---
@@ -77,6 +78,10 @@ def load_all_data(pattern="data/*_results-525.csv"):
         try:
             model_name = os.path.basename(f).replace("_results-525.csv", "")
             model_name = model_name.replace("-", " ").replace("_", " ").title()
+            if "Deepseek" in model_name:
+                model_name = model_name.replace("Deepseek", "DeepSeek")
+            elif "O3" in model_name:
+                model_name = model_name.replace("O3", "o3")
             df = pd.read_csv(f)
             if "severity_rating" not in df.columns or "text" not in df.columns:
                 st.error(f"File '{f}' missing required columns. Skipping.")
@@ -197,7 +202,7 @@ def display_dataset_statistics(df, title, filename, theme_colors):
     ax.set_facecolor(theme_colors["face_color"])
 
     sns.countplot(
-        data=df, x="severity_rating", ax=ax, palette=theme_colors["palette_sequential"]
+        data=df, x="severity_rating", ax=ax, palette=theme_colors["palette_sequential"], hue="severity_rating", legend=False
     )
     ax.set_title(
         f"{title} Severity Rating Distribution", color=theme_colors["text_color"]
@@ -793,15 +798,13 @@ def pairwise_comparison_tab(all_data, theme_colors):
         return
 
     st.subheader("Agreement Metrics")
-    col_metric1, col_metric2 = st.columns(2)
+
+    # Calculate metrics
     exact_agreement = (ratings_a == ratings_b).mean() * 100
-    col_metric1.metric(label="Exact Agreement", value=f"{exact_agreement:.2f}%")
+    weighted_kappa = np.nan
+    kappa_interp = "N/A"
     try:
         weighted_kappa = cohen_kappa_score(ratings_a, ratings_b, weights="quadratic")
-        col_metric2.metric(
-            label="Weighted Kappa (Quadratic)", value=f"{weighted_kappa:.3f}"
-        )
-        kappa_interp = ""
         if weighted_kappa < 0:
             kappa_interp = "Poor agreement"
         elif weighted_kappa < 0.2:
@@ -814,9 +817,42 @@ def pairwise_comparison_tab(all_data, theme_colors):
             kappa_interp = "Substantial agreement"
         else:
             kappa_interp = "Almost perfect agreement"
-        st.caption(f"Interpretation: {kappa_interp}")
     except Exception as e:
-        col_metric2.error(f"Kappa Error: {e}")
+        st.error(f"Kappa Calculation Error: {e}")
+        kappa_interp = f"Error: {e}"
+
+    # Display metrics
+    col_metric1, col_metric2 = st.columns(2)
+    col_metric1.metric(label="Exact Agreement", value=f"{exact_agreement:.2f}%")
+    if not np.isnan(weighted_kappa):
+        col_metric2.metric(
+            label="Weighted Kappa (Quadratic)", value=f"{weighted_kappa:.3f}"
+        )
+        st.caption(f"Kappa Interpretation: {kappa_interp}")
+    else:
+        col_metric2.metric(label="Weighted Kappa (Quadratic)", value="Error")
+        st.caption(f"Kappa Interpretation: {kappa_interp}")
+
+    # Prepare data for download
+    metrics_data = {
+        "Metric": ["Exact Agreement (%)", "Weighted Kappa (Quadratic)", "Kappa Interpretation"],
+        "Value": [f"{exact_agreement:.2f}", f"{weighted_kappa:.3f}" if not np.isnan(weighted_kappa) else "Error", kappa_interp],
+        "Model A": [model_a_name] * 3,
+        "Model B": [model_b_name] * 3,
+    }
+    metrics_df = pd.DataFrame(metrics_data)
+    csv_data = metrics_df.to_csv(index=False).encode("utf-8")
+
+    # Add download button
+    st.download_button(
+        label="Download Agreement Metrics (CSV)",
+        data=csv_data,
+        file_name=f"{model_a_name}_vs_{model_b_name}_agreement_metrics.csv",
+        mime="text/csv",
+        key=f"download_metrics_{model_a_name}_{model_b_name}" # Unique key
+    )
+
+    st.markdown("---") # Add separator before visualization selection
 
     st.subheader("Select Comparison Visualization")
     visualization_type = st.selectbox(
@@ -929,6 +965,10 @@ def multi_model_agreement_tab(all_data):
         st.dataframe(reliability_data_clean)
 
     data_for_alpha = reliability_data_clean.values
+    alpha_score = np.nan # Initialize
+    alpha_interp = "N/A"
+    num_samples_used = 0
+
     try:
         num_samples_used = len(data_for_alpha)
         st.write(f"Calculating Alpha using {num_samples_used} samples...")
@@ -937,21 +977,22 @@ def multi_model_agreement_tab(all_data):
             level_of_measurement="ordinal",
             value_domain=list(range(5)),
         )
-        print(f"Krippendorff's Alpha: {alpha_score}")
         if pd.isna(alpha_score):
             st.warning("Alpha calculation resulted in NaN (likely no variation).")
             row_var_sum = reliability_data_clean.var(axis=1).sum()
             col_var_sum = reliability_data_clean.var(axis=0).sum()
             if row_var_sum == 0 and col_var_sum == 0:
+                alpha_score = 1.0 # Treat as perfect agreement
+                alpha_interp = "Perfect agreement (NaN interpreted as 1.0)"
                 st.metric(label="Krippendorff's Alpha (Ordinal)", value="1.000*")
                 st.caption("*NaN result interpreted as 1.0 (perfect agreement).")
             else:
+                alpha_interp = "NaN (No variation)"
                 st.metric(label="Krippendorff's Alpha (Ordinal)", value="NaN")
         else:
             st.metric(
                 label="Krippendorff's Alpha (Ordinal)", value=f"{alpha_score:.3f}"
             )
-            alpha_interp = ""
             if alpha_score < 0:
                 alpha_interp = "Poor agreement"
             elif alpha_score < 0.2:
@@ -968,6 +1009,25 @@ def multi_model_agreement_tab(all_data):
     except Exception as e:
         st.error(f"Could not calculate Alpha: {e}")
         st.dataframe(reliability_data_clean.head())
+        alpha_interp = f"Error: {e}" # Store error message
+
+    if num_samples_used > 0: # Only show download if calculation was attempted
+        alpha_data = {
+            "Selected Models": [", ".join(selected_models)],
+            "Samples Used": [num_samples_used],
+            "Krippendorff Alpha (Ordinal)": [f"{alpha_score:.3f}" if not pd.isna(alpha_score) else "NaN"],
+            "Interpretation": [alpha_interp] 
+        }
+        alpha_df = pd.DataFrame(alpha_data)
+        csv_alpha = alpha_df.to_csv(index=False).encode('utf-8')
+
+        st.download_button(
+            label="Download Alpha Score (CSV)",
+            data=csv_alpha,
+            file_name=f"krippendorff_alpha_{'_'.join(selected_models)}.csv",
+            mime="text/csv",
+            key=f"download_alpha_{'_'.join(selected_models)}" # Unique key
+        )
 
 
 def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for consistency
@@ -1059,30 +1119,77 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
 
     filtered_df = merged_all_df.copy()
     if label_filter is not None and "label" in filtered_df.columns:
-        filtered_df = filtered_df.dropna(subset=["label"])
-        if not filtered_df.empty:
-            filtered_df["label"] = filtered_df["label"].astype(int)
-            filtered_df = filtered_df[filtered_df["label"] == label_filter]
+        # Ensure label column exists and is not empty before filtering
+        if not filtered_df.empty and 'label' in filtered_df.columns:
+            filtered_df = filtered_df.dropna(subset=["label"])
+            if not filtered_df.empty: # Check again after dropping NaNs
+                filtered_df["label"] = filtered_df["label"].astype(int)
+                filtered_df = filtered_df[filtered_df["label"] == label_filter]
     if filter_model_name != "None" and rating_filter_value:
         rating_col = f"rating_{filter_model_name}"
         if rating_col in filtered_df.columns:
-            filtered_df[rating_col] = pd.to_numeric(
-                filtered_df[rating_col], errors="coerce"
-            )
-            filtered_df = filtered_df.dropna(subset=[rating_col])
-            if not filtered_df.empty:
-                filtered_df = filtered_df[
-                    filtered_df[rating_col].astype(int).isin(rating_filter_value)
-                ]
+            # Ensure rating column exists and is not empty before filtering
+            if not filtered_df.empty and rating_col in filtered_df.columns:
+                filtered_df[rating_col] = pd.to_numeric(
+                    filtered_df[rating_col], errors="coerce"
+                )
+                filtered_df = filtered_df.dropna(subset=[rating_col])
+                if not filtered_df.empty: # Check again after dropping NaNs
+                    filtered_df = filtered_df[
+                        filtered_df[rating_col].astype(int).isin(rating_filter_value)
+                    ]
     if search_query:
         if "text" in filtered_df.columns:
-            filtered_df = filtered_df[
-                filtered_df["text"]
-                .astype(str)
-                .str.contains(search_query, case=False, na=False)
-            ]
+            # Ensure text column exists and is not empty before filtering
+            if not filtered_df.empty and 'text' in filtered_df.columns:
+                filtered_df = filtered_df[
+                    filtered_df["text"]
+                    .astype(str)
+                    .str.contains(search_query, case=False, na=False)
+                ]
         else:
             st.warning("Cannot search: 'text' column missing.")
+
+    total_items = len(filtered_df)
+    st.subheader(f"Filtered Samples ({total_items} samples)")
+
+    # --- Add Export Button for Filtered Data ---
+    if not filtered_df.empty:
+        # Prepare data for download (select and rename columns)
+        cols_to_download = ["text"]
+        if "label" in filtered_df.columns:
+            cols_to_download.append("label")
+        for name in model_names:
+            rating_col = f"rating_{name}"
+            expl_col = f"explanation_{name}"
+            if rating_col in filtered_df.columns:
+                cols_to_download.append(rating_col)
+            if expl_col in filtered_df.columns:
+                cols_to_download.append(expl_col)
+
+        # Ensure only existing columns are selected
+        cols_to_download = [col for col in cols_to_download if col in filtered_df.columns]
+        filtered_df_download = filtered_df[cols_to_download].copy()
+
+        # Clean explanations for export 
+        remove_pattern = r"^\s*(\*{0,2})?Explanation(\*{0,2})?\s*:\s*\n?"
+        for name in model_names:
+            expl_col = f"explanation_{name}"
+            if expl_col in filtered_df_download.columns:
+                filtered_df_download[expl_col] = filtered_df_download[expl_col].astype(str).apply(
+                    lambda x: re.sub(remove_pattern, "", x.strip(), flags=re.IGNORECASE).replace("**", "").strip() or "N/A"
+                )
+
+        csv_export_data = filtered_df_download.to_csv(index=False).encode("utf-8")
+
+        st.download_button(
+            label="Export All Filtered Samples (CSV)",
+            data=csv_export_data,
+            file_name="filtered_samples_export.csv",
+            mime="text/csv",
+            key="export_filtered_csv"
+        )
+        st.markdown("---") 
 
     items_per_page_options = [5, 10, 15, 25]
     items_per_page = st.selectbox(
@@ -1091,8 +1198,7 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
         index=1,
         key="items_per_page_modular",
     )
-    total_items = len(filtered_df)
-    st.subheader(f"Filtered Samples ({total_items} samples)")
+
     if total_items > 0:
         total_pages = math.ceil(total_items / items_per_page)
         if "text_analysis_page_modular" not in st.session_state:
@@ -1106,7 +1212,9 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
         end_idx = min(start_idx + items_per_page, total_items)
         paginated_df = filtered_df.iloc[start_idx:end_idx]
         for index, row in paginated_df.iterrows():
-            expander_label = f"Sample {index}: {str(row.get('text', 'N/A'))[:60]}…"  # preview
+            # Use original index from merged_all_df if possible, otherwise use iloc index
+            display_index = row.name if isinstance(row.name, (int, str)) else index
+            expander_label = f"Sample (Index {display_index}): {str(row.get('text', 'N/A'))[:60]}…"  # preview
             with st.expander(expander_label):
                 st.markdown("**Text:**")
                 # Display text directly without scrollable div
@@ -1160,25 +1268,27 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
                 # Prepare data for download
                 sample_data_df = pd.DataFrame([row])
                 # Select and rename columns for clarity in the CSV
-                cols_to_download = ["text"]
+                cols_to_download_single = ["text"]
                 if "label" in sample_data_df.columns:
-                    cols_to_download.append("label")
+                    cols_to_download_single.append("label")
                 for name in model_names:
                     if f"rating_{name}" in sample_data_df.columns:
-                        cols_to_download.append(f"rating_{name}")
+                        cols_to_download_single.append(f"rating_{name}")
                     if f"explanation_{name}" in sample_data_df.columns:
-                        cols_to_download.append(f"explanation_{name}")
+                        cols_to_download_single.append(f"explanation_{name}")
 
-                sample_data_df_download = sample_data_df[cols_to_download]
+                # Ensure only existing columns are selected for single download
+                cols_to_download_single = [col for col in cols_to_download_single if col in sample_data_df.columns]
+                sample_data_df_download = sample_data_df[cols_to_download_single]
 
-                csv_data = sample_data_df_download.to_csv(index=False).encode("utf-8")
+                csv_data_single = sample_data_df_download.to_csv(index=False).encode("utf-8")
 
                 st.download_button(
-                    label="Download Sample Data (CSV)",
-                    data=csv_data,
-                    file_name=f"sample_{index}.csv",
+                    label="Download This Sample (CSV)",
+                    data=csv_data_single,
+                    file_name=f"sample_{display_index}.csv",
                     mime="text/csv",
-                    key=f"download_sample_{index}" # Unique key per button
+                    key=f"download_sample_{display_index}" # Unique key per button
                 )
                 # --- End Download Button ---
 
@@ -1195,10 +1305,19 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
                 st.session_state.text_analysis_page_modular -= 1
                 st.rerun()
         with col_page2:
-            st.markdown(
-                f"<div style='text-align: center; margin-top: 5px; color: {theme_colors['text_color']};'>Page {current_page} of {total_pages}</div>",
-                unsafe_allow_html=True,
+            # Replace the markdown with a selectbox for page navigation
+            page_selection = st.selectbox(
+                "Go to Page:",
+                options=list(range(1, total_pages + 1)),
+                index=current_page - 1, # Selectbox is 0-indexed
+                key="page_selector_modular",
+                label_visibility="collapsed", # Hide the label visually but keep for accessibility
+                format_func=lambda x: f"Page {x} of {total_pages}" # Display format
             )
+            # If the selected page is different from the current page, update state and rerun
+            if page_selection != current_page:
+                st.session_state.text_analysis_page_modular = page_selection
+                st.rerun()
         with col_page3:
             next_disabled = current_page >= total_pages
             if st.button(
@@ -1211,7 +1330,6 @@ def text_analysis_tab_modular(all_data, theme_colors): # Pass theme_colors for c
                 st.rerun()
     else:
         st.write("No samples match the current filters.")
-
 
 # --- NEW Function for Evaluations Tab ---
 def evaluations_tab(all_data, theme_colors):  # Pass theme_colors
@@ -1253,21 +1371,28 @@ def main():
     set_custom_theme()
     st.title("Depression Severity Detection Comparison")
 
-    # --- Sidebar for Settings and Navigation ---
+    # --- Theme Toggle (Moved) ---
+    # Option 1: Place it below the title
+    # use_dark_theme = st.checkbox(
+    #     "Dark Plots",
+    #     key="dark_theme_plots",
+    #     value=False,
+    #     help="Toggle dark theme for plots",
+    # )
+    # Option 2: Place it in the sidebar (uncomment below)
     with st.sidebar:
-        st.header("Settings")
         use_dark_theme = st.checkbox(
-            "Use Dark Theme for Plots", key="dark_theme_plots", value=False
-        )  # Default to light
-
-        st.header("Navigation")
-        page_options = ["Overall Overview", "Text Sample Analysis", "Evaluations"]
-        selected_page = st.radio("Go to", page_options, key="main_nav")
+            "Dark Plots", key="dark_theme_plots", value=False, help="Toggle dark theme for plots"
+        )
 
     # Determine theme colors based on toggle state
     theme_colors = DARK_THEME if use_dark_theme else LIGHT_THEME
 
     st.markdown("### Comparing LLM Performance for Depression Assessment")
+
+    # --- Tab-based Navigation (No longer inside columns) ---
+    page_options = ["Overall Overview", "Text Sample Analysis", "Evaluations"]
+    tab1, tab2, tab3 = st.tabs(page_options)
 
     try:
         all_data = load_all_data()
@@ -1277,19 +1402,19 @@ def main():
         model_names = list(all_data.keys())
         print(f"Loaded models: {', '.join(model_names)}")
 
-        # --- Display content based on sidebar selection ---
-        if selected_page == "Overall Overview":
-            overall_overview_tab(all_data, theme_colors)  # Pass theme
+        # --- Display content based on selected tab ---
+        with tab1:
+            # This function can now safely use st.columns inside it
+            overall_overview_tab(all_data, theme_colors)
 
-        elif selected_page == "Text Sample Analysis":
-            text_analysis_tab_modular(all_data, theme_colors) # Pass theme
+        with tab2:
+            text_analysis_tab_modular(all_data, theme_colors)
 
-        elif selected_page == "Evaluations":
-            evaluations_tab(all_data, theme_colors)  # Pass theme
+        with tab3:
+            evaluations_tab(all_data, theme_colors)
 
     except Exception as e:
         st.error(f"An unexpected error occurred: {str(e)}")
-        import traceback
 
         st.error("Traceback:")
         st.code(traceback.format_exc())
